@@ -1,7 +1,7 @@
 Config = {}
 
 Config.Debug = false
-Config.Core = "QBX" -- QB,ESX or QBX
+Config.Core = "ESX-OX" -- "QB",  "QBX", "ESX" (when using esx legacy), "ESX-OX" (when using esx-overextended)
 Config.OpenPhone = 'M'
 Config.RepeatTimeout = 3000
 Config.CallRepeats = 5
