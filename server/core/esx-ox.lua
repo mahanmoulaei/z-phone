@@ -58,20 +58,34 @@ if Config.Core == "ESX-OX" then
         -- 1 = Garaged
         -- 2 = Impound
         -- 3 = Outside
-        -- defaukl = Outside
+        -- default = Outside
 
-        -- ADJUST QUERY FROM YOUR TABLE VEHICLE
         local query = [[
             SELECT
                 v.`model` AS vehicle,
-                v.`plate`,
+                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.plate'), ''), v.`plate`) AS plate,
                 v.`garage`,
-                100 AS fuel,
-                100 AS engine,
-                100 AS body,
-                v.`stored` AS state,
+                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.fuelLevel'), ''), 100) AS fuel,
+                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.engineHealth'), ''), 100) AS engine,
+                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.bodyHealth'), ''), 100) AS body,
+                CASE
+                    WHEN v.`stored` = 1 THEN 1
+                    WHEN v.`stored` = 0 THEN (
+                        CASE
+                            WHEN EXISTS (SELECT 1 FROM `impounded_vehicles` iv WHERE iv.`id` = v.`id`) THEN 2
+                            ELSE 3
+                        END
+                    )
+                END AS state,
                 DATE_FORMAT(NOW(), '%d %b %Y %H:%i') AS created_at
-            FROM `owned_vehicles` v WHERE v.`owner` = ? ORDER BY plate ASC
+            FROM `owned_vehicles` v
+            WHERE v.`owner` = (
+                SELECT u.`identifier`
+                FROM `users` u
+                WHERE u.`cid` = ?
+                LIMIT 1
+            )
+            ORDER BY v.`plate` ASC
         ]]
 
         return query

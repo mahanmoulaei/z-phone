@@ -4,6 +4,22 @@ if Config.Core == "ESX-OX" then
 
     xCore = {}
 
+    local function reloadVehicleData()
+        for model, data in pairs(ESX.GetVehicleData()) do
+            Config.Vehicles[model] = {
+                model = model,
+                name = data.name,
+                brand = data.make,
+                category = "Unknown",
+                type = data.type,
+                image = data.image
+            }
+        end
+    end
+
+    do reloadVehicleData() end
+    AddStateBagChangeHandler("esx:vehicleData", "global", reloadVehicleData)
+
     xCore.GetPlayerData = function()
         return ESX.PlayerLoaded and {
             citizenid = ESX.PlayerData.cid
