@@ -60,11 +60,24 @@ if Config.Core == "ESX-OX" then
         -- 3 = Outside
         -- default = Outside
 
-        local query = [[
+        local garages = exports["esx_garage"]:GetGarages()
+
+        -- Dynamically build CASE clause from garages table
+        local garageCaseSQL = "CASE v.`garage`"
+        for key, data in pairs(garages) do
+            local safeKey = key:gsub("'", "\\'")
+            local safeLabel = tostring(data.Label):gsub("'", "\\'")
+            garageCaseSQL = garageCaseSQL .. string.format(" WHEN '%s' THEN '%s'", safeKey, safeLabel)
+        end
+        garageCaseSQL = garageCaseSQL .. " ELSE v.`garage` END"
+
+        -- Inject into query
+        local query = string.format([[
             SELECT
                 v.`model` AS vehicle,
                 COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.plate'), ''), v.`plate`) AS plate,
-                v.`garage`,
+                %s AS garage,
+                CONCAT('https://cfx-nui-es_extended/files/vehicle-images/', v.`model`, '.jpg') AS image,
                 COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.fuelLevel'), ''), 100) AS fuel,
                 COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.engineHealth'), ''), 100) AS engine,
                 COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.bodyHealth'), ''), 100) AS body,
@@ -77,7 +90,7 @@ if Config.Core == "ESX-OX" then
                         END
                     )
                 END AS state,
-                DATE_FORMAT(NOW(), '%d %b %Y %H:%i') AS created_at
+                DATE_FORMAT(NOW(), '%%d %%b %%Y %%H:%%i') AS created_at
             FROM `owned_vehicles` v
             WHERE v.`owner` = (
                 SELECT u.`identifier`
@@ -86,7 +99,7 @@ if Config.Core == "ESX-OX" then
                 LIMIT 1
             )
             ORDER BY v.`plate` ASC
-        ]]
+        ]], garageCaseSQL)
 
         return query
     end
