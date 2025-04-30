@@ -63,42 +63,42 @@ if Config.Core == "ESX-OX" then
         local garages = exports["esx_garage"]:GetGarages()
 
         -- Dynamically build CASE clause from garages table
-        local garageCaseSQL = "CASE v.`garage`"
+        local garageCaseSQL = "CASE ov.`garage`"
         for key, data in pairs(garages) do
             local safeKey = key:gsub("'", "\\'")
             local safeLabel = tostring(data.Label):gsub("'", "\\'")
             garageCaseSQL = garageCaseSQL .. string.format(" WHEN '%s' THEN '%s'", safeKey, safeLabel)
         end
-        garageCaseSQL = garageCaseSQL .. " ELSE v.`garage` END"
+        garageCaseSQL = garageCaseSQL .. " ELSE ov.`garage` END"
 
         -- Inject into query
         local query = string.format([[
             SELECT
-                v.`model` AS vehicle,
-                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.plate'), ''), v.`plate`) AS plate,
+                ov.`model` AS vehicle,
+                COALESCE(NULLIF(JSON_VALUE(ov.`vehicle`, '$.plate'), ''), ov.`plate`) AS plate,
                 %s AS garage,
-                CONCAT('https://cfx-nui-es_extended/files/vehicle-images/', v.`model`, '.jpg') AS image,
-                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.fuelLevel'), ''), 100) AS fuel,
-                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.engineHealth'), ''), 100) AS engine,
-                COALESCE(NULLIF(JSON_VALUE(v.`vehicle`, '$.bodyHealth'), ''), 100) AS body,
+                CONCAT('https://cfx-nui-es_extended/files/vehicle-images/', ov.`model`, '.jpg') AS image,
+                COALESCE(NULLIF(JSON_VALUE(ov.`vehicle`, '$.fuelLevel'), ''), 100) AS fuel,
+                COALESCE(NULLIF(JSON_VALUE(ov.`vehicle`, '$.engineHealth'), ''), 100) AS engine,
+                COALESCE(NULLIF(JSON_VALUE(ov.`vehicle`, '$.bodyHealth'), ''), 100) AS body,
                 CASE
-                    WHEN v.`stored` = 1 THEN 1
-                    WHEN v.`stored` = 0 THEN (
+                    WHEN ov.`stored` = 1 THEN 1
+                    WHEN ov.`stored` = 0 THEN (
                         CASE
-                            WHEN EXISTS (SELECT 1 FROM `impounded_vehicles` iv WHERE iv.`id` = v.`id`) THEN 2
+                            WHEN EXISTS (SELECT 1 FROM `impounded_vehicles` iv WHERE iv.`id` = ov.`id`) THEN 2
                             ELSE 3
                         END
                     )
                 END AS state,
                 DATE_FORMAT(NOW(), '%%d %%b %%Y %%H:%%i') AS created_at
-            FROM `owned_vehicles` v
-            WHERE v.`owner` = (
-                SELECT u.`identifier`
+            FROM `owned_vehicles` ov
+            WHERE ov.`owner` COLLATE utf8mb4_unicode_ci = (
+                SELECT u.`identifier` COLLATE utf8mb4_unicode_ci
                 FROM `users` u
                 WHERE u.`cid` = ?
                 LIMIT 1
             )
-            ORDER BY v.`plate` ASC
+            ORDER BY ov.`plate` ASC
         ]], garageCaseSQL)
 
         return query
@@ -107,20 +107,25 @@ if Config.Core == "ESX-OX" then
     xCore.queryPlayerHouses = function()
         -- ADJUST QUERY FROM YOUR TABLE HOUSING
         local query = [[
-        SELECT
-                hl.id,
-                hl.name,
-                0 as tier,
-                null as coords,
-                0 as is_has_garage,
+            SELECT
+                d.`id`,
+                d.`name`,
+                0 AS tier,
+                NULL AS coords,
+                0 AS is_has_garage,
                 1 AS is_house_locked,
                 1 AS is_garage_locked,
                 1 AS is_stash_locked,
-                '[]' as keyholders
+                '[]' AS keyholders
             FROM
-                datastore_data hl
-            WHERE hl.owner = ? and hl.name = 'property'
-            ORDER BY hl.id DESC
+                `datastore_data` d
+            WHERE d.`owner` COLLATE utf8mb4_unicode_ci = (
+                SELECT u.`identifier` COLLATE utf8mb4_unicode_ci
+                FROM `users` u
+                WHERE u.`cid` = ?
+                LIMIT 1
+            ) AND d.`name` = 'property'
+            ORDER BY d.`id` DESC
         ]]
 
         return query
@@ -128,48 +133,64 @@ if Config.Core == "ESX-OX" then
 
     xCore.bankHistories = function(citizenid)
         -- type = withdraw or deposit (lowercase)
+
         local query = [[
-            select
-                lower(bs.type) as type,
-                bs.type as label,
-                bs.amount as total,
-                DATE_FORMAT(now(), '%d/%m/%Y %H:%i') as created_at
-            from banking as bs
-            where bs.identifier = ? order by bs.id desc
+            SELECT
+                LOWER(b.`type`) AS type,
+                b.`type` AS label,
+                b.`amount` AS total,
+                DATE_FORMAT(FROM_UNIXTIME(b.`time` / 1000), '%d/%m/%Y %H:%i') AS created_at
+            FROM `banking` AS b
+            WHERE b.`identifier` COLLATE utf8mb4_unicode_ci = (
+                SELECT u.`identifier` COLLATE utf8mb4_unicode_ci
+                FROM `users` u
+                WHERE u.`cid` = ?
+                LIMIT 1
+            )
+            ORDER BY b.`id` DESC LIMIT 50
         ]]
 
-        local histories = MySQL.query.await(query, { citizenid })
-        if not histories then
-            histories = {}
-        end
-
-        return histories
+        return MySQL.query.await(query, { citizenid }) or {}
     end
 
     xCore.bankInvoices = function(citizenid)
         local query = [[
-            select
-                pi.id,
-                pi.target as society,
-                pi.label as reason,
-                pi.amount,
-                pi.sender as sendercitizenid,
-                DATE_FORMAT(now(), '%d/%m/%Y %H:%i') as created_at
-            from billing as pi
-            where pi.identifier = ? order by pi.id desc
+            SELECT
+                bill.`id`,
+                bill.`target` AS society,
+                bill.`label` AS reason,
+                bill.`amount`,
+                bill.`sender` AS sendercitizenid,
+                DATE_FORMAT(NOW(), '%d/%m/%Y %H:%i') AS created_at
+            FROM `billing` AS bill
+            WHERE bill.`identifier` COLLATE utf8mb4_unicode_ci = (
+                SELECT u.`identifier` COLLATE utf8mb4_unicode_ci
+                FROM `users` u
+                WHERE u.`cid` = ?
+                LIMIT 1
+            )
+            ORDER BY bill.`id` DESC
         ]]
 
-        local bills = MySQL.query.await(query, { citizenid })
-        if not bills then
-            bills = {}
-        end
-
-        return bills
+        return MySQL.query.await(query, { citizenid }) or {}
     end
 
     xCore.bankInvoiceByCitizenID = function(id, citizenid)
         local query = [[
-            select pi.id, pi.amount, pi.label as reason, pi.target as society, pi.amount from billing pi WHERE pi.id = ? and pi.identifier = ? LIMIT 1
+            SELECT
+                bill.`id`,
+                bill.`amount`,
+                bill.`label` AS reason,
+                bill.`target` AS society,
+                bill.`amount`
+            FROM `billing` bill
+            WHERE bill.`id` = ? and bill.`identifier` COLLATE utf8mb4_unicode_ci = (
+                SELECT u.`identifier` COLLATE utf8mb4_unicode_ci
+                FROM `users` u
+                WHERE u.`cid` = ?
+                LIMIT 1
+            )
+            LIMIT 1
         ]]
 
         return MySQL.single.await(query, { id, citizenid })
@@ -177,7 +198,9 @@ if Config.Core == "ESX-OX" then
 
     xCore.deleteBankInvoiceByID = function(id)
         local query = [[
-            DELETE FROM billing WHERE id = ?
+            DELETE
+            FROM `billing`
+            WHERE `id` = ?
         ]]
 
         MySQL.query(query, { id })
